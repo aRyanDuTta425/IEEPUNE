@@ -24,8 +24,9 @@ class ShieldSettings(BaseSettings):
     # --- Safety Thresholds ---
     JAILBREAK_THRESHOLD: float = 0.75
     PRIVACY_THRESHOLD: float = 0.80
-    BLOCK_THRESHOLD: float = 0.85
-    REVIEW_THRESHOLD: float = 0.65
+    # FIX: Lowered fusion thresholds to match calibrated score distributions
+    BLOCK_THRESHOLD: float = 0.55
+    REVIEW_THRESHOLD: float = 0.35
 
     # --- Intent Graph Parameters ---
     # FIX 4: Increased alpha (0.3→0.6) and K (3→5) for stronger propagation
@@ -37,8 +38,9 @@ class ShieldSettings(BaseSettings):
     INTENT_SCORING_METHOD: Literal["max", "weighted_avg"] = "max"
 
     # --- Clustering ---
-    HDBSCAN_MIN_CLUSTER_SIZE: int = 5
-    HDBSCAN_MIN_SAMPLES: int = 3
+    # FIX: Lowered min_cluster_size for more granular clusters → higher centroid specificity
+    HDBSCAN_MIN_CLUSTER_SIZE: int = 3
+    HDBSCAN_MIN_SAMPLES: int = 2
     EMBEDDING_DIM: int = 384
     CLUSTER_METRIC: str = "euclidean"
 

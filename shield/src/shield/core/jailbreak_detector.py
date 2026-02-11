@@ -23,17 +23,18 @@ from shield.core.vector_index import VectorIndex, create_vector_index
 logger = logging.getLogger(__name__)
 
 # ── FIX 2: Score calibration constants ────────────────────────────────────────
-# Benign prompts typically have raw cosine < 0.3 against jailbreak centroids.
-# Jailbreak prompts typically have raw cosine > 0.55.
+# Empirical observation with all-MiniLM-L6-v2 + cluster centroids:
+# Benign prompts typically have raw cosine < 0.15 against jailbreak centroids.
+# Jailbreak prompts typically have raw cosine > 0.35.
 # Rescaling: score = clip((raw - BASELINE) / (1 - BASELINE), 0, 1)
-SCORE_BASELINE = 0.3
-SCORE_RANGE = 1.0 - SCORE_BASELINE  # 0.7
+SCORE_BASELINE = 0.15
+SCORE_RANGE = 1.0 - SCORE_BASELINE  # 0.85
 
 
 def calibrate_score(raw_cosine: float) -> float:
     """Rescale raw cosine similarity to calibrated jailbreak score.
 
-    FIX 2: Maps [0.3, 1.0] → [0.0, 1.0], clips below 0.3 to 0.
+    FIX 2: Maps [0.15, 1.0] → [0.0, 1.0], clips below 0.15 to 0.
 
     Args:
         raw_cosine: Raw cosine similarity from vector index.
@@ -77,6 +78,7 @@ class JailbreakDetector:
         self._index: Optional[VectorIndex] = None
         self._cluster_result: Optional[ClusterResult] = None
         self._corpus: List[Dict[str, Any]] = []
+        self._corpus_embeddings: Optional[np.ndarray] = None  # cached corpus embeddings
         self._initialized = False
         self._calibrated_threshold: Optional[float] = None
 
@@ -111,7 +113,13 @@ class JailbreakDetector:
         cached = load_clusters()
         if cached is not None:
             self._cluster_result = cached
-            self._build_index_from_clusters()
+            # Re-embed corpus to index all prompts (cache only stores centroids)
+            if self._corpus:
+                texts = [p["text"] for p in self._corpus]
+                self._corpus_embeddings = self._embedder.embed(texts)
+                self._build_index_from_corpus(self._corpus_embeddings)
+            else:
+                self._index = create_vector_index(self._embedder.dimension)
             self._initialized = True
             return
 
@@ -146,6 +154,7 @@ class JailbreakDetector:
 
         logger.info("Embedding %d prompts for clustering…", len(texts))
         embeddings = self._embedder.embed(texts)
+        self._corpus_embeddings = embeddings  # cache for index
 
         self._cluster_result = cluster_embeddings(
             embeddings, min_cluster_size=min_cluster_size
@@ -154,15 +163,21 @@ class JailbreakDetector:
         if save_to_disk:
             save_clusters(self._cluster_result)
 
-        self._build_index_from_clusters()
+        self._build_index_from_corpus(embeddings)
         return self._cluster_result
 
-    def _build_index_from_clusters(self) -> None:
-        """Build vector index from cluster centroids."""
+    def _build_index_from_corpus(self, embeddings: Optional[np.ndarray] = None) -> None:
+        """Build vector index from ALL corpus embeddings for higher recall.
+
+        Uses individual prompt embeddings rather than cluster centroids
+        so that nearest-neighbor search finds closely matching prompts.
+        Clustering is still used for metadata and analysis.
+        """
         self._index = create_vector_index(self._embedder.dimension)
-        if self._cluster_result and self._cluster_result.centroids.size > 0:
-            self._index.add(self._cluster_result.centroids)
-            logger.info("Indexed %d cluster centroids", self._cluster_result.num_clusters)
+        if embeddings is not None and embeddings.size > 0:
+            self._index.add(embeddings)
+            logger.info("Indexed %d corpus embeddings (clusters=%d)",
+                        len(embeddings), self.num_clusters)
 
     def detect(self, prompt: str) -> JailbreakDetectionResult:
         """Score a single prompt for jailbreak similarity.

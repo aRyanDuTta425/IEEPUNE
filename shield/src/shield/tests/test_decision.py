@@ -25,7 +25,7 @@ class TestDecisionFusion:
 
     def test_review_threshold(self) -> None:
         """Score in [REVIEW, BLOCK) should trigger review."""
-        inputs = FusionInput(jailbreak_score=0.7)
+        inputs = FusionInput(jailbreak_score=0.45)
         result = fuse(inputs)
         assert result.action == Action.REVIEW
 
@@ -57,13 +57,13 @@ class TestDecisionFusion:
 
     def test_exact_block_threshold(self) -> None:
         """Score exactly at BLOCK_THRESHOLD should be block."""
-        inputs = FusionInput(jailbreak_score=0.85)
+        inputs = FusionInput(jailbreak_score=0.55)
         result = fuse(inputs)
         assert result.action == Action.BLOCK
 
     def test_exact_review_threshold(self) -> None:
         """Score exactly at REVIEW_THRESHOLD should be review."""
-        inputs = FusionInput(intent_score=0.65)
+        inputs = FusionInput(intent_score=0.35)
         result = fuse(inputs)
         assert result.action == Action.REVIEW
 

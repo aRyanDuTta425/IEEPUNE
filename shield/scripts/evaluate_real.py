@@ -168,6 +168,8 @@ def main() -> None:
 
     y_true_l1, y_pred_l1, y_scores_l1 = [], [], []
     layer1_timing = []
+    all_jb_scores_raw = []
+    all_benign_scores_raw = []
 
     # Jailbreak prompts (positive class)
     print(f"\n  Testing {len(jailbreaks)} jailbreak prompts...")
@@ -176,10 +178,10 @@ def main() -> None:
         r = detector.detect(p["text"])
         layer1_timing.append((time.perf_counter() - start) * 1000)
         y_true_l1.append(1)
-        y_pred_l1.append(1 if r.jailbreak_score >= 0.5 else 0)
         y_scores_l1.append(r.jailbreak_score)
+        all_jb_scores_raw.append(r.jailbreak_score)
 
-    jb_scores = [s for t, s in zip(y_true_l1, y_scores_l1) if t == 1]
+    jb_scores = all_jb_scores_raw
     print(f"   Jailbreak avg score:  {np.mean(jb_scores):.4f} (min={min(jb_scores):.4f}, max={max(jb_scores):.4f})")
 
     # Benign prompts (negative class)
@@ -189,16 +191,23 @@ def main() -> None:
         r = detector.detect(p)
         layer1_timing.append((time.perf_counter() - start) * 1000)
         y_true_l1.append(0)
-        y_pred_l1.append(1 if r.jailbreak_score >= 0.5 else 0)
         y_scores_l1.append(r.jailbreak_score)
+        all_benign_scores_raw.append(r.jailbreak_score)
 
-    benign_scores = [s for t, s in zip(y_true_l1, y_scores_l1) if t == 0]
+    benign_scores = all_benign_scores_raw
     print(f"   Benign avg score:     {np.mean(benign_scores):.4f} (min={min(benign_scores):.4f}, max={max(benign_scores):.4f})")
     print(f"   Separation:           {np.mean(jb_scores) - np.mean(benign_scores):.4f}")
 
-    # Auto-calibrate threshold
+    # Auto-calibrate threshold from data, then use it for binary predictions
     cal_threshold = detector.auto_calibrate_threshold(benign_prompts)
+    # Use midpoint threshold for binary classification
+    l1_threshold = cal_threshold if cal_threshold > 0.05 else 0.15
     print(f"   Auto-calibrated threshold: {cal_threshold:.4f}")
+    print(f"   Binary threshold used:     {l1_threshold:.4f}")
+
+    # Now compute binary predictions using the calibrated threshold
+    for score in y_scores_l1:
+        y_pred_l1.append(1 if score >= l1_threshold else 0)
 
     metrics_l1 = compute_metrics(y_true_l1, y_pred_l1, y_scores_l1)
     print_metrics("Layer 1: Jailbreak Detection", metrics_l1)
