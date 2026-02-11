@@ -1,0 +1,4 @@
+system,precision,recall,f1,auc,latency_ms,tp,fp,fn,tn
+SHIELD,1.0,0.5548,0.7137,0.8699,81.09,86,0,69,100
+Toxic-BERT,1.0,0.0065,0.0128,0.7191,179.01,1,0,154,100
+Keyword Filter,1.0,0.1226,0.2184,0.729,0.11,19,0,136,100
