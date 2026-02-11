@@ -120,6 +120,14 @@ def compute_base_risk(text: str, jailbreak_similarity: float = 0.0) -> float:
     # FIX 3: max-based formula for stronger signal
     combo = jailbreak_similarity * 0.6 + keyword * 0.4 + length
     risk = max(jailbreak_similarity, keyword, min(1.0, combo))
+
+    # Nonlinear boost: amplify suspicious turns to trigger earlier escalation
+    if risk > 0.4:
+        risk = min(1.0, risk * 1.3)
+
+    # Nonlinear risk amplification: boost medium risks
+    risk = min(1.0, risk ** 1.5) if risk > 0.0 else 0.0
+
     return min(1.0, risk)
 
 
@@ -240,6 +248,10 @@ class IntentGraph:
         for i in range(n):
             self._graph.nodes[i]["risk"] = risks[i]
 
+        # Slope-based escalation bonus: if last 3 turns show monotonically increasing risk
+        if n >= 3 and risks[-3] < risks[-2] < risks[-1]:
+            risks[-1] = min(1.0, risks[-1] + 0.15)
+
         # Compute final intent score
         intent_score = self._compute_final_score(risks, timestamps)
 
@@ -260,6 +272,9 @@ class IntentGraph:
     def _compute_final_score(self, risks: List[float], timestamps: List[datetime]) -> float:
         """Compute the final intent score from node risks.
 
+        Applies turn-based recency weighting: weight = exp(-0.5 * age_in_turns)
+        Recent turns dominate the final score.
+
         Args:
             risks: Per-node risk values.
             timestamps: Per-node timestamps.
@@ -270,27 +285,25 @@ class IntentGraph:
         if not risks:
             return 0.0
 
+        n = len(risks)
+
+        # Turn-based recency weighting
+        recency_weights = [math.exp(-0.5 * (n - 1 - i)) for i in range(n)]
+        recency_risks = [r * w for r, w in zip(risks, recency_weights)]
+
         method = settings.INTENT_SCORING_METHOD
 
         if method == "max":
-            return max(risks)
+            return max(recency_risks)
 
         elif method == "weighted_avg":
-            # Weight by recency (more recent = higher weight)
-            if len(risks) == 1:
-                return risks[0]
-            latest = max(timestamps)
-            weights = []
-            for ts in timestamps:
-                dt = (latest - ts).total_seconds()
-                weights.append(math.exp(-0.01 * dt))
-            total_weight = sum(weights)
+            total_weight = sum(recency_weights)
             if total_weight == 0:
                 return max(risks)
-            return sum(r * w for r, w in zip(risks, weights)) / total_weight
+            return sum(r * w for r, w in zip(risks, recency_weights)) / total_weight
 
         else:
-            return max(risks)
+            return max(recency_risks)
 
     def _export_graph_data(
         self,

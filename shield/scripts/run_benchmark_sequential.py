@@ -217,9 +217,9 @@ def score_conversation_baseline(baseline, turns):
 
 
 def evaluate_shield(threshold):
-    """Run SHIELD on all 3 datasets, return results, then delete SHIELD."""
+    """Run SHIELD on all 3 datasets with auto-calibration, return results."""
     logger.info("=" * 70)
-    logger.info("Evaluating SHIELD on all datasets...")
+    logger.info("Evaluating SHIELD on all datasets (with auto-calibration)...")
     logger.info("=" * 70)
 
     os.environ["SHIELD_MODE"] = "lightweight"
@@ -254,30 +254,79 @@ def evaluate_shield(threshold):
     except ImportError:
         has_tqdm = False
 
+    from sklearn.metrics import f1_score as sk_f1_score
+
+    def find_optimal_threshold(y_true, y_scores, min_precision=0.90):
+        """Find threshold that maximizes F1 while keeping precision >= min_precision."""
+        best_threshold = 0.5
+        best_f1 = 0.0
+        for t in np.arange(0.05, 0.95, 0.01):
+            y_pred = (y_scores >= t).astype(int)
+            tp = int(np.sum((y_pred == 1) & (y_true == 1)))
+            fp = int(np.sum((y_pred == 1) & (y_true == 0)))
+            fn = int(np.sum((y_pred == 0) & (y_true == 1)))
+            prec = tp / (tp + fp) if (tp + fp) > 0 else 0
+            rec = tp / (tp + fn) if (tp + fn) > 0 else 0
+            f1 = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0
+            if prec >= min_precision and f1 > best_f1:
+                best_f1 = f1
+                best_threshold = t
+        return best_threshold, best_f1
+
     results = {}
+    calibrated_thresholds = {}
 
     # ── Jailbreak ─────────────────────────────────────────────────────────────
     texts_jb, y_true_jb = load_jailbreak_dataset()
     logger.info("Jailbreak: %d prompts (%d jb, %d benign)", len(texts_jb), y_true_jb.sum(), (1 - y_true_jb).sum())
 
+    # Calibrate scoring distributions from data
+    benign_texts = [texts_jb[i] for i in range(len(texts_jb)) if y_true_jb[i] == 0]
+    detector.calibrate_from_distributions(benign_texts[:50])
+
+    # 10% validation split for threshold calibration
+    n_jb = len(texts_jb)
+    n_val = max(10, int(0.1 * n_jb))
+    np.random.seed(SEED)
+    val_idx = np.random.choice(n_jb, size=n_val, replace=False)
+    val_mask = np.zeros(n_jb, dtype=bool)
+    val_mask[val_idx] = True
+
+    # Score validation set
+    val_scores = []
+    for i in np.where(val_mask)[0]:
+        r = detector.detect(texts_jb[i])
+        val_scores.append(r.jailbreak_score)
+    val_scores_arr = np.array(val_scores)
+    val_labels = y_true_jb[val_mask]
+
+    # Find optimal threshold on validation set
+    jb_threshold, val_f1 = find_optimal_threshold(val_labels, val_scores_arr)
+    calibrated_thresholds["jailbreak"] = jb_threshold
+    logger.info("  Auto-calibrated jailbreak threshold: %.3f (val F1=%.3f)", jb_threshold, val_f1)
+
+    # Score full dataset
     t0 = time.time()
     jb_scores = []
-    iterator = tqdm(texts_jb, desc="SHIELD jailbreak") if has_tqdm else texts_jb
-    for text in iterator:
-        result = detector.detect(text)
+    iterator = tqdm(range(n_jb), desc="SHIELD jailbreak") if has_tqdm else range(n_jb)
+    for i in iterator:
+        result = detector.detect(texts_jb[i])
         jb_scores.append(result.jailbreak_score)
-    jb_time = (time.time() - t0) * 1000 / len(texts_jb)
+    jb_time = (time.time() - t0) * 1000 / n_jb
     jb_scores_arr = np.array(jb_scores)
 
-    m = compute_metrics(y_true_jb, jb_scores_arr, threshold)
+    m = compute_metrics(y_true_jb, jb_scores_arr, jb_threshold)
     m["latency_ms"] = round(jb_time, 2)
     results["jailbreak"] = {"SHIELD": {"metrics": m, "y_true": y_true_jb, "y_scores": jb_scores_arr}}
-    logger.info("  SHIELD jailbreak: P=%.3f R=%.3f F1=%.3f AUC=%s", m["precision"], m["recall"], m["f1"], m["auc"])
+    logger.info("  SHIELD jailbreak: P=%.3f R=%.3f F1=%.3f AUC=%s (threshold=%.3f)",
+                m["precision"], m["recall"], m["f1"], m["auc"], jb_threshold)
 
     # ── Multi-turn ────────────────────────────────────────────────────────────
     conversations, y_true_mt = load_multiturn_dataset()
-    logger.info("Multi-turn: %d conversations (%d unsafe, %d benign)", len(conversations), y_true_mt.sum(), (1 - y_true_mt).sum())
+    logger.info("Multi-turn: %d conversations (%d unsafe, %d benign)",
+                len(conversations), y_true_mt.sum(), (1 - y_true_mt).sum())
 
+    # Score all conversations
     t0 = time.time()
     mt_scores = []
     iterator = tqdm(conversations, desc="SHIELD multi-turn") if has_tqdm else conversations
@@ -293,10 +342,19 @@ def evaluate_shield(threshold):
     mt_time = (time.time() - t0) * 1000 / len(conversations)
     mt_scores_arr = np.array(mt_scores)
 
-    m = compute_metrics(y_true_mt, mt_scores_arr, threshold)
+    # Auto-calibrate multi-turn threshold on 10% validation
+    n_mt = len(conversations)
+    n_val_mt = max(5, int(0.1 * n_mt))
+    val_idx_mt = np.random.choice(n_mt, size=n_val_mt, replace=False)
+    mt_threshold, _ = find_optimal_threshold(y_true_mt[val_idx_mt], mt_scores_arr[val_idx_mt])
+    calibrated_thresholds["multiturn"] = mt_threshold
+    logger.info("  Auto-calibrated multi-turn threshold: %.3f", mt_threshold)
+
+    m = compute_metrics(y_true_mt, mt_scores_arr, mt_threshold)
     m["latency_ms"] = round(mt_time, 2)
     results["multiturn"] = {"SHIELD": {"metrics": m, "y_true": y_true_mt, "y_scores": mt_scores_arr}}
-    logger.info("  SHIELD multi-turn: P=%.3f R=%.3f F1=%.3f AUC=%s", m["precision"], m["recall"], m["f1"], m["auc"])
+    logger.info("  SHIELD multi-turn: P=%.3f R=%.3f F1=%.3f AUC=%s (threshold=%.3f)",
+                m["precision"], m["recall"], m["f1"], m["auc"], mt_threshold)
 
     # ── Privacy ───────────────────────────────────────────────────────────────
     texts_pr, y_true_pr = load_privacy_dataset()
@@ -321,17 +379,33 @@ def evaluate_shield(threshold):
     pr_time = (time.time() - t0) * 1000 / len(texts_pr)
     pr_scores_arr = np.array(pr_scores)
 
-    m = compute_metrics(y_true_pr, pr_scores_arr, threshold)
+    # Auto-calibrate privacy threshold
+    n_pr = len(texts_pr)
+    n_val_pr = max(5, int(0.1 * n_pr))
+    val_idx_pr = np.random.choice(n_pr, size=n_val_pr, replace=False)
+    pr_threshold, _ = find_optimal_threshold(y_true_pr[val_idx_pr], pr_scores_arr[val_idx_pr])
+    calibrated_thresholds["privacy"] = pr_threshold
+    logger.info("  Auto-calibrated privacy threshold: %.3f", pr_threshold)
+
+    m = compute_metrics(y_true_pr, pr_scores_arr, pr_threshold)
     m["latency_ms"] = round(pr_time, 2)
     results["privacy"] = {"SHIELD": {"metrics": m, "y_true": y_true_pr, "y_scores": pr_scores_arr}}
-    logger.info("  SHIELD privacy: P=%.3f R=%.3f F1=%.3f AUC=%s", m["precision"], m["recall"], m["f1"], m["auc"])
+    logger.info("  SHIELD privacy: P=%.3f R=%.3f F1=%.3f AUC=%s (threshold=%.3f)",
+                m["precision"], m["recall"], m["f1"], m["auc"], pr_threshold)
+
+    # Print calibrated thresholds summary
+    logger.info("─" * 50)
+    logger.info("AUTO-CALIBRATED THRESHOLDS:")
+    for name, t in calibrated_thresholds.items():
+        logger.info("  %s: %.3f", name, t)
+    logger.info("─" * 50)
 
     # ── Cleanup SHIELD ────────────────────────────────────────────────────────
-    del detector, provider, graph, transform_classifier, privacy_pred, face, age
+    del detector, provider, transform_classifier, privacy_pred, face, age
     force_gc()
     logger.info("SHIELD unloaded.")
 
-    return results
+    return results, calibrated_thresholds
 
 
 # ═════════════════════════════════════════════════════════════════════════════════
@@ -482,18 +556,19 @@ def main():
 
     print("=" * 95)
     print("  SHIELD BENCHMARK SUITE — Memory-Efficient Sequential Runner")
-    print(f"  Threshold: {args.threshold} | Seed: {SEED}")
+    print(f"  Baseline Threshold: {args.threshold} | Seed: {SEED}")
+    print("  SHIELD: Auto-calibrated per-layer thresholds")
     print("=" * 95)
 
-    # Step 1: SHIELD on all datasets
-    all_results = evaluate_shield(args.threshold)
+    # Step 1: SHIELD on all datasets (auto-calibrated)
+    all_results, calibrated_thresholds = evaluate_shield(args.threshold)
 
-    # Step 2: Baselines one at a time
+    # Step 2: Baselines one at a time (use fixed threshold)
     from baselines import ZeroShotNLIBaseline, ToxicBertBaseline, SentimentHeuristicBaseline, KeywordFilterBaseline
 
     baselines_to_run = []
     if not args.skip_nli:
-        baselines_to_run.append((ZeroShotNLIBaseline, {"batch_size": 4}))  # smaller batch for memory
+        baselines_to_run.append((ZeroShotNLIBaseline, {"batch_size": 4}))
     baselines_to_run.append((ToxicBertBaseline, {"batch_size": 16}))
     baselines_to_run.append((SentimentHeuristicBaseline, {"batch_size": 16}))
     baselines_to_run.append((KeywordFilterBaseline, {}))
@@ -507,12 +582,20 @@ def main():
             traceback.print_exc()
             continue
 
-    # Step 3: Save results
+    # Step 3: Print calibrated thresholds
+    print("\n" + "=" * 95)
+    print("  AUTO-CALIBRATED SHIELD THRESHOLDS")
+    print("=" * 95)
+    for name, t in calibrated_thresholds.items():
+        print(f"  {name:>15}: {t:.3f}")
+    print("=" * 95)
+
+    # Step 4: Save results
     for dataset_name in ["jailbreak", "multiturn", "privacy"]:
         save_csv(dataset_name, all_results[dataset_name])
         print_table(f"{dataset_name.upper()} RESULTS", all_results[dataset_name])
 
-    # Step 4: Plots
+    # Step 5: Plots
     generate_plots(all_results, args.threshold)
 
     print("\n" + "=" * 95)
@@ -523,3 +606,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

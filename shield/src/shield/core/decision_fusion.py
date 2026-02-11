@@ -1,10 +1,13 @@
 """Decision Fusion — aggregates scores from all modules and determines final action.
 
-Logic:
-    final_score = max(jailbreak_score, intent_score, privacy_score)
-    action = BLOCK if final_score >= BLOCK_THRESHOLD
-           = REVIEW if final_score >= REVIEW_THRESHOLD
-           = ALLOW  otherwise
+Supports two modes (configurable via settings.FUSION_MODE):
+    "max":      final_score = max(jailbreak, intent, privacy)
+    "weighted": final_score = w1*jailbreak + w2*intent + w3*privacy
+
+Action:
+    BLOCK  if final_score >= BLOCK_THRESHOLD
+    REVIEW if final_score >= REVIEW_THRESHOLD
+    ALLOW  otherwise
 """
 
 from __future__ import annotations
@@ -53,10 +56,21 @@ class FusionResult:
     scores: Dict[str, float]
 
 
+def _parse_fusion_weights() -> tuple:
+    """Parse fusion weights from config string."""
+    try:
+        parts = [float(x.strip()) for x in settings.FUSION_WEIGHTS.split(",")]
+        if len(parts) == 3:
+            return parts[0], parts[1], parts[2]
+    except (ValueError, AttributeError):
+        pass
+    return 0.5, 0.3, 0.2  # default
+
+
 def fuse(inputs: FusionInput) -> FusionResult:
     """Fuse scores from all detection modules into a final decision.
 
-    Step 1: Compute final_score = max(jailbreak, intent, privacy)
+    Step 1: Compute final_score based on FUSION_MODE
     Step 2: Determine action based on thresholds
     Step 3: Collect violations from modules exceeding their thresholds
 
@@ -71,7 +85,16 @@ def fuse(inputs: FusionInput) -> FusionResult:
     privacy = inputs.privacy_score
 
     # Step 1: Final score
-    final_score = max(jb, intent, privacy)
+    mode = getattr(settings, "FUSION_MODE", "max")
+
+    if mode == "weighted":
+        w_jb, w_intent, w_privacy = _parse_fusion_weights()
+        final_score = w_jb * jb + w_intent * intent + w_privacy * privacy
+        # Ensure any single high-risk score can still trigger
+        final_score = max(final_score, max(jb, intent, privacy) * 0.8)
+        final_score = min(1.0, final_score)
+    else:
+        final_score = max(jb, intent, privacy)
 
     # Step 2: Action
     if final_score >= settings.BLOCK_THRESHOLD:
@@ -112,7 +135,8 @@ def fuse(inputs: FusionInput) -> FusionResult:
         ))
 
     logger.info(
-        "Decision fusion: action=%s score=%.3f violations=%d (jb=%.3f intent=%.3f priv=%.3f)",
+        "Decision fusion [%s]: action=%s score=%.3f violations=%d (jb=%.3f intent=%.3f priv=%.3f)",
+        mode,
         action.value,
         final_score,
         len(violations),

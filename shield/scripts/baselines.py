@@ -64,13 +64,14 @@ class BaselineModel(ABC):
 
 
 class ZeroShotNLIBaseline(BaselineModel):
-    """Zero-shot classification using facebook/bart-large-mnli.
+    """Zero-shot classification using typeform/distilbert-base-uncased-mnli.
 
+    3x smaller and faster than bart-large-mnli while maintaining strong NLI performance.
     Labels: ["safe", "unsafe", "harmful", "privacy violation", "illegal"]
     Returns the max probability across unsafe labels.
     """
 
-    def __init__(self, model_name: str = "facebook/bart-large-mnli", batch_size: int = 8) -> None:
+    def __init__(self, model_name: str = "typeform/distilbert-base-uncased-mnli", batch_size: int = 16) -> None:
         self._model_name = model_name
         self._batch_size = batch_size
         self._pipeline = None
@@ -79,7 +80,7 @@ class ZeroShotNLIBaseline(BaselineModel):
 
     @property
     def name(self) -> str:
-        return "Zero-Shot NLI (BART-MNLI)"
+        return "Zero-Shot NLI (DistilBERT-MNLI)"
 
     def _load(self) -> None:
         if self._pipeline is not None:

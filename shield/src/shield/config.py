@@ -23,7 +23,7 @@ class ShieldSettings(BaseSettings):
 
     # --- Safety Thresholds ---
     JAILBREAK_THRESHOLD: float = 0.75
-    PRIVACY_THRESHOLD: float = 0.80
+    PRIVACY_THRESHOLD: float = 0.75
     # FIX: Lowered fusion thresholds to match calibrated score distributions
     BLOCK_THRESHOLD: float = 0.55
     REVIEW_THRESHOLD: float = 0.35
@@ -35,7 +35,7 @@ class ShieldSettings(BaseSettings):
     INTENT_GRAPH_K_NEIGHBORS: int = 5
     INTENT_GRAPH_MAX_ITERATIONS: int = 10
     INTENT_GRAPH_CONVERGENCE: float = 0.001
-    INTENT_SCORING_METHOD: Literal["max", "weighted_avg"] = "max"
+    INTENT_SCORING_METHOD: Literal["max", "weighted_avg"] = "weighted_avg"
 
     # --- Clustering ---
     # FIX: Lowered min_cluster_size for more granular clusters → higher centroid specificity
@@ -62,6 +62,13 @@ class ShieldSettings(BaseSettings):
     AGE_ESTIMATOR_WEIGHTS: str = "age_net.pth"
     CLIP_MODEL: str = "ViT-B/32"
     SENTENCE_TRANSFORMER_MODEL: str = "all-MiniLM-L6-v2"
+
+    # --- Jailbreak Scoring ---
+    JAILBREAK_TEMPERATURE: float = 0.5
+
+    # --- Decision Fusion ---
+    FUSION_MODE: Literal["max", "weighted"] = "weighted"
+    FUSION_WEIGHTS: str = "0.5,0.3,0.2"  # jailbreak, intent, privacy
 
     # --- Feature Flags ---
     ENABLE_ASYNC_CLUSTERING: bool = True

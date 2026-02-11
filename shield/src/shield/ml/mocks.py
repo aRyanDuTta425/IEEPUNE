@@ -152,6 +152,7 @@ class SemanticTransformClassifier(BaseTransformClassifier):
     """
 
     # Label descriptions → transformation type
+    # Expanded with requested privacy labels for better coverage
     LABEL_GROUPS: Dict[str, List[str]] = {
         "clothing_removal": [
             "remove clothes from person",
@@ -160,6 +161,12 @@ class SemanticTransformClassifier(BaseTransformClassifier):
             "nude photo",
             "strip clothing off",
             "remove all clothing",
+            "remove clothes",
+            "nude",
+            "exposed body",
+            "revealing outfit",
+            "skimpy clothing",
+            "remove outfit",
         ],
         "sexualization": [
             "make this person sexy",
@@ -168,6 +175,10 @@ class SemanticTransformClassifier(BaseTransformClassifier):
             "erotic photo of person",
             "provocative revealing outfit",
             "seductive pose",
+            "sexualize",
+            "bikini",
+            "provocative image",
+            "erotic content",
         ],
         "face_swap": [
             "swap this person's face with someone else",
@@ -175,6 +186,10 @@ class SemanticTransformClassifier(BaseTransformClassifier):
             "face swap onto another body",
             "put someone else's face on this body",
             "celebrity face on this person",
+            "face swap",
+            "face replace",
+            "deepfake",
+            "swap face",
         ],
         "age_regression": [
             "make this person look younger",
@@ -182,6 +197,12 @@ class SemanticTransformClassifier(BaseTransformClassifier):
             "younger version of person",
             "make person look like a teenager",
             "age regression younger",
+            "minor",
+            "child",
+            "younger",
+            "teen",
+            "age change",
+            "child version",
         ],
         "age_progression": [
             "make this person look older",

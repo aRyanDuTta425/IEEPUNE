@@ -1,4 +1,4 @@
-layer,precision,recall,f1,auc,tp,fp,fn,tn
-L1_jailbreak,1.0,1.0,1.0,1.0,109,0,0,15
-L2_intent,0.875,0.7778,0.8235,0.8889,7,1,2,2
-L3_privacy,1.0,1.0,1.0,1.0,15,0,0,5
+layer,precision,recall,f1,roc_auc,pr_auc,tp,fp,fn,tn,latency_ms
+L1_jailbreak,1.0,1.0,1.0,1.0,1.0,109,0,0,15,16.7
+L2_intent,1.0,0.6667,0.8,0.8519,0.9576,6,0,3,3,91.4
+L3_privacy,1.0,1.0,1.0,1.0,1.0,15,0,0,5,10.7
