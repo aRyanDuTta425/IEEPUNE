@@ -1,4 +1,7 @@
-layer,precision,recall,f1,roc_auc,pr_auc,tp,fp,fn,tn,latency_ms
-L1_jailbreak,1.0,1.0,1.0,1.0,1.0,109,0,0,15,16.7
-L2_intent,1.0,0.6667,0.8,0.8519,0.9576,6,0,3,3,91.4
-L3_privacy,1.0,1.0,1.0,1.0,1.0,15,0,0,5,10.7
+layer,dataset,precision,recall,f1,roc_auc,tp,fp,fn,tn,latency_ms,threshold,samples
+L1_jailbreak,small (124),1.0,1.0,1.0,1.0,109,0,0,15,16.7,0.75,124
+L2_intent,small (12),1.0,0.6667,0.8,0.8519,6,0,3,3,91.4,0.35,12
+L3_privacy,small (20),1.0,1.0,1.0,1.0,15,0,0,5,10.7,0.75,20
+L1_jailbreak,large (2548),0.9287,0.9083,0.9184,0.9488,1406,108,142,892,13.69,0.350,2548
+L2_intent,large (255),1.0,0.729,0.8433,0.8812,113,0,42,100,111.48,0.290,255
+L3_privacy,large (400),0.8933,0.8739,0.8835,0.9204,201,24,29,146,26.47,0.330,400
